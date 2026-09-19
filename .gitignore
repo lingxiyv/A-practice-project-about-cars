@@ -1,0 +1,41 @@
+# CLion / CMake 构建目录
+cmake-build-*/
+build/
+build-*/
+out/
+
+# CLion / IDE 配置
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+
+# STM32CubeIDE / Eclipse 相关，如果不用可忽略
+.settings/
+.cproject
+.project
+*.launch
+
+# 编译输出
+*.o
+*.obj
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.su
+*.d
+*.lst
+*.out
+*.srec
+
+# 调试、日志、临时文件
+*.log
+*.swp
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
