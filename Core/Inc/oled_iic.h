@@ -3,26 +3,26 @@
 
 #include "stm32f1xx.h"
 
-/* Òı½ÅÅäÖÃ½á¹¹Ìå */
+/* å¼•è„šé…ç½®ç»“æ„ä½“ */
 typedef struct {
     GPIO_TypeDef *Port;
     uint16_t      Pin;
 } IIC_PinCfg_t;
 
-/* IIC¾ä±ú½á¹¹Ìå */
+/* IICå¥æŸ„ç»“æ„ä½“ */
 typedef struct {
     IIC_PinCfg_t  scl;
     IIC_PinCfg_t  sda;
 } IIC_HandleTypeDef;
 
-/* Íâ²¿ÊµÀıÉùÃ÷ */
+/* å¤–éƒ¨å®ä¾‹å£°æ˜ */
 extern IIC_HandleTypeDef IIC1;
-//¶¨Òå»ù´¡¼ÆËãºê
+//å®šä¹‰åŸºç¡€è®¡ç®—å®
 #define SDA_PIN_NUM         (uint8_t)((IIC1.sda.Pin & 0x0F00) >> 8)
 #define SDA_REG_ADDR        ((SDA_PIN_NUM < 8) ? (&IIC1.sda.Port->CRL) : (&IIC1.sda.Port->CRH))
 #define SDA_PIN_SHIFT       ((SDA_PIN_NUM % 8) * 4)
 
-/* IO²Ù×÷ºê */
+/* IOæ“ä½œå® */
 #define IIC_SCL(x)   HAL_GPIO_WritePin(IIC1.scl.Port, IIC1.scl.Pin, \
                                        (x) ? GPIO_PIN_SET : GPIO_PIN_RESET)
 #define IIC_SDA(x)   HAL_GPIO_WritePin(IIC1.sda.Port, IIC1.sda.Pin, \
@@ -43,7 +43,7 @@ extern IIC_HandleTypeDef IIC1;
     *SDA_REG_ADDR = tmp; \
 } while(0)
 
-/* IICËùÓĞ²Ù×÷º¯Êı */
+/* IICæ‰€æœ‰æ“ä½œå‡½æ•° */
 void iic_start(void);
 void iic_stop(void);
 void iic_ack(void);

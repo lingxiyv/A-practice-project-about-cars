@@ -3,23 +3,23 @@
 #include "delay.h"
 
 
-static uint32_t g_fac_us = 0;       /* usÑÓÊ±±¶³ËÊı */
+static uint32_t g_fac_us = 0;       /* uså»¶æ—¶å€ä¹˜æ•° */
 
 /**
- * @brief     ³õÊ¼»¯ÑÓ³Ùº¯Êı
- * @retval    ÎŞ
+ * @brief     åˆå§‹åŒ–å»¶è¿Ÿå‡½æ•°
+ * @retval    æ— 
  */  
 void delay_init(void) {
-    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk; // Ê¹ÄÜ DWT
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk; // ä½¿èƒ½ DWT
     DWT->CYCCNT = 0;
-    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;            // Æô¶¯ÖÜÆÚ¼ÆÊı
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;            // å¯åŠ¨å‘¨æœŸè®¡æ•°
 }
 
 
 /**
- * @brief     ÑÓÊ±nus
- * @param     nus: ÒªÑÓÊ±µÄusÊı
- * @retval    ÎŞ
+ * @brief     å»¶æ—¶nus
+ * @param     nus: è¦å»¶æ—¶çš„usæ•°
+ * @retval    æ— 
  */
 void delay_us(uint32_t us) {
     uint32_t start = DWT->CYCCNT;
@@ -28,9 +28,9 @@ void delay_us(uint32_t us) {
 }
 
 /**
- * @brief     ÑÓÊ±nms
- * @param     nms: ÒªÑÓÊ±µÄmsÊı (0< nms <= (2^32 / fac_us / 1000))(fac_usÒ»°ãµÈÓÚÏµÍ³Ö÷Æµ, ×ÔĞĞÌ×Èë¼ÆËã)
- * @retval    ÎŞ
+ * @brief     å»¶æ—¶nms
+ * @param     nms: è¦å»¶æ—¶çš„msæ•° (0< nms <= (2^32 / fac_us / 1000))(fac_usä¸€èˆ¬ç­‰äºç³»ç»Ÿä¸»é¢‘, è‡ªè¡Œå¥—å…¥è®¡ç®—)
+ * @retval    æ— 
  */
 void delay_ms(uint16_t nms)
 {

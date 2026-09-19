@@ -7,26 +7,26 @@
 #include "stm32f1xx.h"
 
 
-/* ÃüÁî/Êı¾İ ¶¨Òå */
-#define OLED_CMD        0       /* Ğ´ÃüÁî */
-#define OLED_DATA       1       /* Ğ´Êı¾İ */
+/* å‘½ä»¤/æ•°æ® å®šä¹‰ */
+#define OLED_CMD        0       /* å†™å‘½ä»¤ */
+#define OLED_DATA       1       /* å†™æ•°æ® */
 
-#define OLED_I2C_ADDR   (0x78)  /* OLEDµÄÉè±¸µØÖ· */
+#define OLED_I2C_ADDR   (0x78)  /* OLEDçš„è®¾å¤‡åœ°å€ */
 
-void oled_wr_byte(uint8_t data, uint8_t cmd);    /* ·¢ËÍÒ»¸ö×Ö½Úµ½OLED */
-uint32_t oled_pow(uint8_t m, uint8_t n);         /* OLEDÃİº¯Êı */
+void oled_wr_byte(uint8_t data, uint8_t cmd);    /* å‘é€ä¸€ä¸ªå­—èŠ‚åˆ°OLED */
+uint32_t oled_pow(uint8_t m, uint8_t n);         /* OLEDå¹‚å‡½æ•° */
 
 
-void oled_init(void);           /* OLED³õÊ¼»¯ */
-void oled_clear(void);          /* OLEDÇåÆÁ */
-void oled_display_on(void);     /* ¿ªÆôOLEDÏÔÊ¾ */
-void oled_display_off(void);    /* ¹Ø±ÕOLEDÏÔÊ¾ */
-void oled_refresh_gram(void);   /* ¸üĞÂÏÔ´æµ½OLED */
-void oled_draw_point(uint8_t x, uint8_t y, uint8_t dot);    /* OLED»­µã */
-void oled_fill(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t dot);        /* OLEDÇøÓòÌî³ä */
-void oled_show_char(uint8_t x, uint8_t y, uint8_t chr, uint8_t size, uint8_t mode); /* OLEDÏÔÊ¾×Ö·û */
-void oled_show_num(uint8_t x, uint8_t y, uint32_t num, uint8_t len, uint8_t size);  /* OLEDÏÔÊ¾Êı×Ö */
-void oled_show_string(uint8_t x, uint8_t y, const char *p, uint8_t size);           /* OLEDÏÔÊ¾×Ö·û´® */
+void oled_init(void);           /* OLEDåˆå§‹åŒ– */
+void oled_clear(void);          /* OLEDæ¸…å± */
+void oled_display_on(void);     /* å¼€å¯OLEDæ˜¾ç¤º */
+void oled_display_off(void);    /* å…³é—­OLEDæ˜¾ç¤º */
+void oled_refresh_gram(void);   /* æ›´æ–°æ˜¾å­˜åˆ°OLED */
+void oled_draw_point(uint8_t x, uint8_t y, uint8_t dot);    /* OLEDç”»ç‚¹ */
+void oled_fill(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t dot);        /* OLEDåŒºåŸŸå¡«å…… */
+void oled_show_char(uint8_t x, uint8_t y, uint8_t chr, uint8_t size, uint8_t mode); /* OLEDæ˜¾ç¤ºå­—ç¬¦ */
+void oled_show_num(uint8_t x, uint8_t y, uint32_t num, uint8_t len, uint8_t size);  /* OLEDæ˜¾ç¤ºæ•°å­— */
+void oled_show_string(uint8_t x, uint8_t y, const char *p, uint8_t size);           /* OLEDæ˜¾ç¤ºå­—ç¬¦ä¸² */
 #endif
 
 

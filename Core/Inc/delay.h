@@ -5,9 +5,9 @@
 #include "stm32f1xx.h"
 
 
-void delay_init(void);          /* ³õÊ¼»¯ÑÓ³Ùº¯Êı */
-void delay_ms(uint16_t nms);    /* ÑÓÊ±nms */
-void delay_us(uint32_t nus);    /* ÑÓÊ±nus */
+void delay_init(void);          /* åˆå§‹åŒ–å»¶è¿Ÿå‡½æ•° */
+void delay_ms(uint16_t nms);    /* å»¶æ—¶nms */
+void delay_us(uint32_t nus);    /* å»¶æ—¶nus */
 
 #endif
 

@@ -18,8 +18,8 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "adc.h"
 #include "tim.h"
+#include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -49,7 +49,9 @@ uint8_t adc_index = 0;
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+volatile int32_t pwm_value = 10000;   // 初始 PWM 比较值
+volatile uint8_t last_ab = 0;         // 编码器上次 AB 状态
+volatile uint32_t exti_count = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -60,7 +62,30 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == GPIO_PIN_1)
+  {
+    exti_count++;
+    static uint32_t last_tick = 0;
+    uint32_t now = HAL_GetTick();
 
+    // 时间窗：10ms 内只接受一次边沿
+    if (now - last_tick < 10) return;
+    last_tick = now;
+
+    // 电平确认：毛刺过去后 A 会回到低，这里挡掉大部分
+    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1) != GPIO_PIN_SET) return;
+
+    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_2) == GPIO_PIN_RESET)
+      pwm_value += 50;
+    else
+      pwm_value -= 50;
+
+    if (pwm_value > 19999) pwm_value = 19999;
+    if (pwm_value < 500)   pwm_value = 500;
+  }
+}
 /* USER CODE END 0 */
 
 /**
@@ -92,12 +117,14 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_ADC1_Init();
   MX_TIM2_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  HAL_UART_Receive_IT(&huart2, &rx_data, 1);
+  last_ab = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1) << 1) | HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_2);
   oled_init();       // OLED 初始化
   oled_clear();     // 清屏
-  oled_show_string(0,24,"Car status:",12);
+  oled_show_string(0,0,"Car status:",12);
   oled_refresh_gram();
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
@@ -108,37 +135,30 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* ADC 读取与滤波 */
-    uint32_t adc_value = 0;
-    uint32_t sum = 0;
-
-    // 必须启动ADC并等待转换完成
-    HAL_ADC_Start(&hadc1);
-    HAL_ADC_PollForConversion(&hadc1, 10);
-    adc_value = HAL_ADC_GetValue(&hadc1);
-    HAL_ADC_Stop(&hadc1);
-
-    adc_buffer[adc_index] = adc_value;
-    adc_index = (adc_index + 1) % FILTER_SIZE;
-
-    for (int i = 0; i < FILTER_SIZE; i++) {
-      sum += adc_buffer[i];
-    }
-    uint32_t avg_value = sum / FILTER_SIZE;
-
-    // 映射到 CCR (500 ~ 19999)
-    uint32_t ccr_value = 500 + (avg_value * (19999 - 500)) / 4095;
-    if (ccr_value > 19999) ccr_value = 19999;
-    if (ccr_value < 500) ccr_value = 500;
-
-    // 更新 PWM
+    // 用编码器维护的 pwm_value 控制 PWM CH2
     __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 10000);
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, ccr_value);
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value);
 
-    uint8_t state=Instruction_retrieval();
+    // 按键处理：按下 KEY 复位到 10000
+    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
+    {
+      HAL_Delay(20);  // 消抖
+      if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
+      {
+        pwm_value = 10000;
+        while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET); // 等待释放
+      }
+    }
+
+    // UART 指令和 Action
+    uint8_t state = Instruction_retrieval();
     Action_execution(state);
+
+    // OLED 显示，可以显示 pwm_value
+    oled_show_string(0, 0, "Car status:", 12);
+    oled_show_num(0, 12, pwm_value, 5, 12);
+    oled_show_num(0,24,exti_count,5,12);
     oled_show_char(0,48,ascii,12,1);
-    oled_show_num(0,36,avg_value,5,12);
     ascii++;
     if (ascii>'~') {
       ascii=' ';
@@ -159,7 +179,6 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
@@ -189,16 +208,19 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
-  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV6;
-  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
-  {
-    Error_Handler();
-  }
 }
 
 /* USER CODE BEGIN 4 */
-
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART2)
+  {
+    rx_cmd = rx_data;                     // rx_data 已被 HAL 写入最新字节，直接读取
+    last_cmd_tick = HAL_GetTick();        // 喂狗
+    new_cmd_flag = 1;                     // 通知主循环
+    HAL_UART_Receive_IT(&huart2, &rx_data, 1); // 再次开启接收
+  }
+}
 /* USER CODE END 4 */
 
 /**
