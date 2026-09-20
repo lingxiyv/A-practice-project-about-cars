@@ -41,17 +41,21 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#define FILTER_SIZE 8
-uint32_t adc_buffer[FILTER_SIZE]={0};
-uint8_t adc_index = 0;
+
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-volatile int32_t pwm_value = 10000;   // 初始 PWM 比较值
-volatile uint8_t last_ab = 0;         // 编码器上次 AB 状态
-volatile uint32_t exti_count = 0;
+/* USER CODE BEGIN PV */
+volatile int32_t pwm_value = 10000;
+
+int16_t encoder_last  = 0;
+int16_t encoder_now   = 0;
+int16_t encoder_delta = 0;
+int32_t encoder_accum = 0;
+uint32_t last_oled_tick = 0;
+/* USER CODE END PV */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -62,30 +66,7 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-  if (GPIO_Pin == GPIO_PIN_1)
-  {
-    exti_count++;
-    static uint32_t last_tick = 0;
-    uint32_t now = HAL_GetTick();
 
-    // 时间窗：10ms 内只接受一次边沿
-    if (now - last_tick < 10) return;
-    last_tick = now;
-
-    // 电平确认：毛刺过去后 A 会回到低，这里挡掉大部分
-    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1) != GPIO_PIN_SET) return;
-
-    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_2) == GPIO_PIN_RESET)
-      pwm_value += 50;
-    else
-      pwm_value -= 50;
-
-    if (pwm_value > 19999) pwm_value = 19999;
-    if (pwm_value < 500)   pwm_value = 500;
-  }
-}
 /* USER CODE END 0 */
 
 /**
@@ -119,30 +100,56 @@ int main(void)
   MX_GPIO_Init();
   MX_TIM2_Init();
   MX_USART2_UART_Init();
+  MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
   HAL_UART_Receive_IT(&huart2, &rx_data, 1);
-  last_ab = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1) << 1) | HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_2);
-  oled_init();       // OLED 初始化
-  oled_clear();     // 清屏
-  oled_show_string(0,0,"Car status:",12);
+
+  HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL);
+  encoder_last = (int16_t)__HAL_TIM_GET_COUNTER(&htim4);
+
+  oled_init();
+  oled_clear();
+  oled_show_string(0, 0,  "Car status:", 12);
+  oled_show_string(0, 12, "pwm_value:",  12);
   oled_refresh_gram();
+
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
-  uint8_t ascii = ' ';
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    // 用编码器维护的 pwm_value 控制 PWM CH2
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 10000);
+    encoder_now   = (int16_t)__HAL_TIM_GET_COUNTER(&htim4);
+    encoder_delta = encoder_now - encoder_last;
+    encoder_last  = encoder_now;
+
+    if (encoder_delta != 0)
+    {
+      encoder_accum += encoder_delta;   // 4 倍频累积
+
+      // 每累计 4 个计数 = 转一格，PWM 变化 50
+      while (encoder_accum >= 4)
+      {
+        pwm_value += 100;
+        encoder_accum -= 4;
+      }
+      while (encoder_accum <= -4)
+      {
+        pwm_value -= 100;
+        encoder_accum += 4;
+      }
+
+      if (pwm_value > 19999) pwm_value = 19999;
+      if (pwm_value < 500)   pwm_value = 500;
+    }
     __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value);
 
     // 按键处理：按下 KEY 复位到 10000
     if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
     {
-      HAL_Delay(20);  // 消抖
+      HAL_Delay(10);  // 消抖
       if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
       {
         pwm_value = 10000;
@@ -154,16 +161,14 @@ int main(void)
     uint8_t state = Instruction_retrieval();
     Action_execution(state);
 
-    // OLED 显示，可以显示 pwm_value
-    oled_show_string(0, 0, "Car status:", 12);
-    oled_show_num(0, 12, pwm_value, 5, 12);
-    oled_show_num(0,24,exti_count,5,12);
-    oled_show_char(0,48,ascii,12,1);
-    ascii++;
-    if (ascii>'~') {
-      ascii=' ';
+    if (HAL_GetTick() - last_oled_tick >= 100)
+    {
+      last_oled_tick = HAL_GetTick();
+
+      oled_show_num(64, 12, pwm_value, 5, 12);
+
+      oled_refresh_gram();
     }
-    oled_refresh_gram();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

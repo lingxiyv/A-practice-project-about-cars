@@ -10,46 +10,43 @@ uint8_t rx_cmd = 0;
 uint8_t current_action = 'X';
 uint8_t new_cmd_flag = 0;
 uint32_t last_cmd_tick = 0;
+static uint8_t last_state = 0xFF;
 
-uint8_t Instruction_retrieval(void) {
-    // 处理新收到的指令
+uint8_t Instruction_retrieval(void)
+{
     uint8_t car_state = STOP;
+
+    // 收到新指令：直接覆盖 current_action
     if (new_cmd_flag)
     {
-        new_cmd_flag = 0; // 清除标志位
-
-        // 只有指令改变时才执行电机驱动，避免频繁重复调用
-        if (rx_cmd != current_action)
-        {
-            current_action = rx_cmd;
-
-            switch (current_action)
-            {
-            case 'W': car_state = FORWARD;  break;
-            case 'S': car_state = BACKWARD; break;
-            case 'A': car_state = LEFT_TURN; break;
-            case 'D': car_state = RIGHT_TURN; break;
-            case 'X': car_state = STOP; break;
-            default:  car_state = STOP;     break; // 收到未知字符也停车
-            }
-        }
+        new_cmd_flag = 0;
+        current_action = rx_cmd;
     }
 
-    // 心跳超时检测
-    // 如果当前时间 - 上一次收到指令的时间 > 500ms
+    // 心跳超时：强制停车
     if ((HAL_GetTick() - last_cmd_tick) > TIMEOUT_MS)
     {
-        // 只有在小车还在运动时，才需要触发强制停止
-        if (current_action != 'X')
-        {
-            current_action = 'X';
-            // Motor_Stop(); // 强制刹车
-        }
+        current_action = 'X';
     }
+
+    // 每次调用都根据 current_action 生成 car_state
+    switch (current_action)
+    {
+    case 'W': car_state = FORWARD;    break;
+    case 'S': car_state = BACKWARD;   break;
+    case 'A': car_state = LEFT_TURN;  break;
+    case 'D': car_state = RIGHT_TURN; break;
+    case 'X': car_state = STOP;       break;
+    default:  car_state = STOP;       break;
+    }
+
     return car_state;
 }
 
 void Action_execution(uint8_t car_state) {
+    if (car_state == last_state) return;   // 状态没变，什么都不做
+    last_state = car_state;
+
     switch (car_state) {
     case FORWARD: {
         oled_show_string(64,0," FORWARD",12);
