@@ -55,6 +55,7 @@ int16_t encoder_now   = 0;
 int16_t encoder_delta = 0;
 int32_t encoder_accum = 0;
 uint32_t last_oled_tick = 0;
+
 /* USER CODE END PV */
 /* USER CODE END PV */
 
@@ -146,10 +147,10 @@ int main(void)
     }
     __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value);
 
-    // 按键处理：按下 KEY 复位到 10000
+    // 按键处理：按下 KEY 参数复位
     if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
     {
-      HAL_Delay(10);  // 消抖
+      HAL_Delay(5);  // 消抖
       if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
       {
         pwm_value = 10000;

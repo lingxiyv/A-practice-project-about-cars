@@ -50,7 +50,7 @@ void Action_execution(uint8_t car_state) {
     switch (car_state) {
     case FORWARD: {
         oled_show_string(64,0," FORWARD",12);
-        oled_refresh_gram();
+        // oled_refresh_gram();
         HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4|GPIO_PIN_6, GPIO_PIN_SET);
         HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5|GPIO_PIN_7, GPIO_PIN_RESET);
         break;
@@ -64,14 +64,14 @@ void Action_execution(uint8_t car_state) {
     }
     case LEFT_TURN: {
         oled_show_string(64,0," LEFT    ",12);
-        oled_refresh_gram();
+        // oled_refresh_gram();
         HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4|GPIO_PIN_7, GPIO_PIN_SET);
         HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5|GPIO_PIN_6, GPIO_PIN_RESET);
         break;
     }
     case RIGHT_TURN: {
         oled_show_string(64,0," RIGHT    ",12);
-        oled_refresh_gram();
+        // oled_refresh_gram();
         HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4|GPIO_PIN_7, GPIO_PIN_RESET);
         HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5|GPIO_PIN_6, GPIO_PIN_SET);
         break;
@@ -79,7 +79,7 @@ void Action_execution(uint8_t car_state) {
     default: {
         // 停止
         oled_show_string(64,0," STOP     ",12);
-        oled_refresh_gram();
+        // oled_refresh_gram();
         HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4|GPIO_PIN_6, GPIO_PIN_RESET);
         HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5|GPIO_PIN_7, GPIO_PIN_RESET);
         break;
