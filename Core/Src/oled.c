@@ -234,6 +234,19 @@ uint32_t oled_pow(uint8_t m, uint8_t n)
     return result;
 }
 
+void OLED_ShowSignedNum(uint8_t x, uint8_t y, int32_t num, uint8_t len, uint8_t size) {
+    if (num < 0) {
+        oled_show_char(x, y, '-', size,1); // 先显示负号
+        x += size / 2;                   // 坐标右移半个字符宽度
+        num = -num;                      // 转为正数处理
+    } else {
+        oled_show_char(x, y, '+', size,1); // 正数显示加号（可选）
+        x += size / 2;
+    }
+    // 接着调用你原来的无符号显示函数
+    oled_show_num(x, y, (uint32_t)num, len, size);
+}
+
 /**
  * @brief       显示len个数字
  * @param       x,y : 起始坐标

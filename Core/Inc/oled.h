@@ -3,7 +3,11 @@
 #ifndef OLED_H
 #define OLED_H
 
-#include "stdlib.h" 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include "stdlib.h"
 #include "stm32f1xx.h"
 
 
@@ -26,7 +30,13 @@ void oled_draw_point(uint8_t x, uint8_t y, uint8_t dot);    /* OLED画点 */
 void oled_fill(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t dot);        /* OLED区域填充 */
 void oled_show_char(uint8_t x, uint8_t y, uint8_t chr, uint8_t size, uint8_t mode); /* OLED显示字符 */
 void oled_show_num(uint8_t x, uint8_t y, uint32_t num, uint8_t len, uint8_t size);  /* OLED显示数字 */
+void OLED_ShowSignedNum(uint8_t x, uint8_t y, int32_t num, uint8_t len, uint8_t size);/* OLED显示有符号数字 */
 void oled_show_string(uint8_t x, uint8_t y, const char *p, uint8_t size);           /* OLED显示字符串 */
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif
 
 

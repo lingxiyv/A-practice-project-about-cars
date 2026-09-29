@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "i2c.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -26,7 +27,8 @@
 /* USER CODE BEGIN Includes */
 #include "delay.h"
 #include "oled.h"
-#include "action.h"
+#include "global_parameters.h"
+#include "chassis.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,15 +50,9 @@
 
 /* USER CODE BEGIN PV */
 /* USER CODE BEGIN PV */
-volatile int32_t pwm_value = 10000;
-
-int16_t encoder_last  = 0;
-int16_t encoder_now   = 0;
-int16_t encoder_delta = 0;
-int32_t encoder_accum = 0;
-uint32_t last_oled_tick = 0;
-
-/* USER CODE END PV */
+static uint32_t last_oled_tick = 0;
+static uint32_t last_tick = 0;
+static uint8_t g_uart2_rx_byte;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -102,16 +98,20 @@ int main(void)
   MX_TIM2_Init();
   MX_USART2_UART_Init();
   MX_TIM4_Init();
+  MX_I2C1_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
-  HAL_UART_Receive_IT(&huart2, &rx_data, 1);
+  HAL_UART_Receive_IT(&huart2, &g_uart2_rx_byte, 1);
 
   HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL);
-  encoder_last = (int16_t)__HAL_TIM_GET_COUNTER(&htim4);
+  HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
 
+  car_state_init();
   oled_init();
   oled_clear();
-  oled_show_string(0, 0,  "Car status:", 12);
-  oled_show_string(0, 12, "pwm_value:",  12);
+  oled_show_string(0, 0,  "Car status:STOP", 12);
+  oled_show_string(0, 12, "Current speed(mm/s):",  12);
+  oled_show_string(0, 36, "Voltage:",  12);
   oled_refresh_gram();
 
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
@@ -122,53 +122,34 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    encoder_now   = (int16_t)__HAL_TIM_GET_COUNTER(&htim4);
-    encoder_delta = encoder_now - encoder_last;
-    encoder_last  = encoder_now;
-
-    if (encoder_delta != 0)
-    {
-      encoder_accum += encoder_delta;   // 4 倍频累积
-
-      // 每累计 4 个计数 = 转一格，PWM 变化 50
-      while (encoder_accum >= 4)
-      {
-        pwm_value += 100;
-        encoder_accum -= 4;
-      }
-      while (encoder_accum <= -4)
-      {
-        pwm_value -= 100;
-        encoder_accum += 4;
-      }
-
-      if (pwm_value > 19999) pwm_value = 19999;
-      if (pwm_value < 500)   pwm_value = 500;
+    Bt_Parse_Commands();
+    if (HAL_GetTick() - last_tick >= 10) {
+      last_tick = HAL_GetTick();
+      PWM_automatic_adjustment();
+      Speed_Calculation_ISR();
     }
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, pwm_value);
-
     // 按键处理：按下 KEY 参数复位
     if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
     {
       HAL_Delay(5);  // 消抖
       if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
       {
-        pwm_value = 10000;
+        car_state_init();
         while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET); // 等待释放
       }
     }
 
-    // UART 指令和 Action
-    uint8_t state = Instruction_retrieval();
-    Action_execution(state);
-
     if (HAL_GetTick() - last_oled_tick >= 100)
     {
       last_oled_tick = HAL_GetTick();
-
-      oled_show_num(64, 12, pwm_value, 5, 12);
-
+      OLED_ShowSignedNum(0,24,g_car_state.linear_speed_cm_s,5,12);
+      OLED_ShowSignedNum(48,24,g_car_state.sum,5,12);
+      OLED_ShowSignedNum(48,36,g_car_state.voltage_current,3,12);
       oled_refresh_gram();
+    }
+
+    if (HAL_GetTick() - last_tick >= 1000) {
+      HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
     }
     /* USER CODE END WHILE */
 
@@ -217,14 +198,12 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-  if (huart->Instance == USART2)
-  {
-    rx_cmd = rx_data;                     // rx_data 已被 HAL 写入最新字节，直接读取
-    last_cmd_tick = HAL_GetTick();        // 喂狗
-    new_cmd_flag = 1;                     // 通知主循环
-    HAL_UART_Receive_IT(&huart2, &rx_data, 1); // 再次开启接收
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+  if (huart->Instance == USART2) {
+    // 将接收到的数据放入环形缓冲区
+    Bt_RingBuf_Put(g_uart2_rx_byte);
+    // 再次开启接收中断
+    HAL_UART_Receive_IT(&huart2, &g_uart2_rx_byte, 1);
   }
 }
 /* USER CODE END 4 */
@@ -238,6 +217,7 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
   while (1)
   {
   }

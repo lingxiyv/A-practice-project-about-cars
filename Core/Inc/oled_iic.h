@@ -1,6 +1,10 @@
 #ifndef MYIIC_H
 #define MYIIC_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "stm32f1xx.h"
 
 /* 引脚配置结构体 */
@@ -51,5 +55,9 @@ void iic_nack(void);
 uint8_t iic_wait_ack(void);
 void iic_send_byte(uint8_t txd);
 uint8_t iic_read_byte(unsigned char ack);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

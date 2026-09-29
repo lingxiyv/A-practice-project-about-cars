@@ -3,7 +3,6 @@
 #include "delay.h"
 
 
-static uint32_t g_fac_us = 0;       /* us延时倍乘数 */
 
 /**
  * @brief     初始化延迟函数
