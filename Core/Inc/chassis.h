@@ -11,7 +11,7 @@ extern "C" {
 
 #include "global_parameters.h"
 
-#define TIMEOUT_MS 150           // 超时阈值
+#define TIMEOUT_MS 500           // 超时阈值
 
 void Bt_Parse_Commands(void);    // 蓝牙指令解析
 void SET_Action_execution(state_motion car_state);  //底盘状态设置与执行

@@ -31,7 +31,7 @@ extern "C" {
 //比例系数
 #define SPEED_KP 20
 //最大速度
-#define MAX_LINEAR_SPEED_CM_S 1200
+#define MAX_LINEAR_SPEED_CM_S 120
 //小车运动状态标识
 typedef enum {
     CAR_STOP,
@@ -44,6 +44,7 @@ typedef enum {
 typedef struct {
     state_motion current_motion_state;     //当前状态
     uint16_t linear_speed_target_cm_s;     //目标速度
+    uint8_t bt_speed_percent;              //目标速度百分比
     int16_t left_speed_cm_s;        // 左轮线速度 (m/s)
     int16_t right_speed_cm_s;       // 右轮线速度 (m/s)
     int16_t linear_speed_cm_s;      // 底盘中心线速度 (m/s)
@@ -51,8 +52,7 @@ typedef struct {
     uint8_t voltage_current;        //供电状态（百分比显示）
     uint16_t left_last_count;        //左轮编码器上次读取时间戳
     uint16_t right_last_count;       //右轮编码器上次读取时间戳
-    int16_t speedCalculate_last_count;  //上次速度计算时间戳
-    int16_t sum;
+    uint32_t BT_last_tick;
 }car_state;
 
 extern car_state g_car_state;

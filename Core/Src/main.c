@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "dma.h"
 #include "i2c.h"
 #include "tim.h"
 #include "usart.h"
@@ -52,6 +53,7 @@
 /* USER CODE BEGIN PV */
 static uint32_t last_oled_tick = 0;
 static uint32_t last_tick = 0;
+static uint32_t LED_last_tick = 0;
 static uint8_t g_uart2_rx_byte;
 /* USER CODE END PV */
 
@@ -95,6 +97,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_TIM2_Init();
   MX_USART2_UART_Init();
   MX_TIM4_Init();
@@ -110,7 +113,7 @@ int main(void)
   oled_init();
   oled_clear();
   oled_show_string(0, 0,  "Car status:STOP", 12);
-  oled_show_string(0, 12, "Current speed(mm/s):",  12);
+  oled_show_string(0, 12, "Current speed(cm/s):",  12);
   oled_show_string(0, 36, "Voltage:",  12);
   oled_refresh_gram();
 
@@ -125,8 +128,8 @@ int main(void)
     Bt_Parse_Commands();
     if (HAL_GetTick() - last_tick >= 10) {
       last_tick = HAL_GetTick();
-      PWM_automatic_adjustment();
       Speed_Calculation_ISR();
+      PWM_automatic_adjustment();
     }
     // 按键处理：按下 KEY 参数复位
     if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
@@ -135,20 +138,23 @@ int main(void)
       if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
       {
         car_state_init();
+        SET_Action_execution(CAR_STOP);
+        __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
+        __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 0);
         while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET); // 等待释放
       }
     }
 
-    if (HAL_GetTick() - last_oled_tick >= 100)
+    if (HAL_GetTick() - last_oled_tick >= 20)
     {
       last_oled_tick = HAL_GetTick();
       OLED_ShowSignedNum(0,24,g_car_state.linear_speed_cm_s,5,12);
-      OLED_ShowSignedNum(48,24,g_car_state.sum,5,12);
       OLED_ShowSignedNum(48,36,g_car_state.voltage_current,3,12);
       oled_refresh_gram();
     }
 
-    if (HAL_GetTick() - last_tick >= 1000) {
+    if (HAL_GetTick() - LED_last_tick >= 1000) {
+      LED_last_tick = HAL_GetTick();
       HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
     }
     /* USER CODE END WHILE */

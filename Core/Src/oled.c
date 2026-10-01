@@ -2,8 +2,7 @@
 #include "stdlib.h"
 #include "oled.h"
 #include "oledfont.h"
-#include "delay.h"
-#include "oled_iic.h"
+#include "i2c.h"
 
 
 /*
@@ -24,6 +23,23 @@
  */
 static uint8_t g_atk_oled_gram[128][8];
 
+/* ---- 硬件 I2C1 驱动（PB8=SCL, PB9=SDA）---- */
+/* 控制字节：Co=1 表示“后跟1个字节，随后又是控制字节”。
+   0x80=命令(Co=1,D/C#=0)，0xC0=数据(Co=1,D/C#=1)。
+   在单个 DMA 传输里逐字节交叉控制字节时必须用 Co=1；不能用 Co=0 的 0x00/0x40
+   （那表示“后续全是命令/数据、不再有控制字节”，交叉使用会导致乱码） */
+#define OLED_CTRL_CMD   0x80
+#define OLED_CTRL_DATA  0xC0
+
+/* 一页传输缓冲：3组命令(6字节) + 128个数据(每个前带0xC0，共256字节) */
+#define OLED_PAGE_BUF_SIZE (6 + 128 * 2)
+
+static uint8_t oled_page_tx_buf[OLED_PAGE_BUF_SIZE];
+static volatile uint8_t oled_dma_busy = 0;   /* 1：DMA 正在发送一页 */
+static uint8_t oled_refresh_page = 0;        /* 下一次要刷新的页号 0~7 */
+
+static void oled_refresh_page_blocking(uint8_t page);
+
 /**
  * @brief       更新显存到OLED
  * @param       无
@@ -31,18 +47,33 @@ static uint8_t g_atk_oled_gram[128][8];
  */
 void oled_refresh_gram(void)
 {
-    uint8_t i, n;
+    uint8_t p = oled_refresh_page;
+    uint16_t idx = 0;
 
-    for (i = 0; i < 8; i++)
+    /* 上一页的 DMA 还没发完，本次直接返回，不阻塞主循环 */
+    if (oled_dma_busy) return;
+
+    /* 设置页地址（0~7） */
+    oled_page_tx_buf[idx++] = OLED_CTRL_CMD;  oled_page_tx_buf[idx++] = 0xb0 + p;
+    /* 设置显示位置—列低地址、列高地址 */
+    oled_page_tx_buf[idx++] = OLED_CTRL_CMD;  oled_page_tx_buf[idx++] = 0x00;
+    oled_page_tx_buf[idx++] = OLED_CTRL_CMD;  oled_page_tx_buf[idx++] = 0x10;
+
+    /* 128 字节数据，每个数据前带一个 0x40 数据控制字节 */
+    for (uint8_t n = 0; n < 128; n++)
     {
-        oled_wr_byte (0xb0 + i, OLED_CMD); /* 设置页地址（0~7） */
-        oled_wr_byte (0x00, OLED_CMD);     /* 设置显示位置—列低地址 */
-        oled_wr_byte (0x10, OLED_CMD);     /* 设置显示位置—列高地址 */
+        oled_page_tx_buf[idx++] = OLED_CTRL_DATA;
+        oled_page_tx_buf[idx++] = g_atk_oled_gram[n][p];
+    }
 
-        for (n = 0; n < 128; n++)
-        {
-            oled_wr_byte(g_atk_oled_gram[n][i], OLED_DATA);
-        }
+    oled_dma_busy = 1;
+    if (HAL_I2C_Master_Transmit_DMA(&hi2c1, OLED_I2C_ADDR, oled_page_tx_buf, idx) != HAL_OK)
+    {
+        oled_dma_busy = 0;      /* 启动失败，复位忙标志 */
+    }
+    else
+    {
+        oled_refresh_page = (p + 1) & 0x07;
     }
 }
 
@@ -51,28 +82,18 @@ void oled_refresh_gram(void)
  * @param  data: 要写入的数据
  * @param  cmd:  命令/数据标志位 (0: 命令, 1: 数据)
  */
- void oled_wr_byte(uint8_t data, uint8_t cmd)
+void oled_wr_byte(uint8_t data, uint8_t cmd)
 {
-    iic_start();
+    uint8_t buf[2];
 
-    /* 发送 OLED 的 I2C 设备地址 */
-    iic_send_byte(OLED_I2C_ADDR);
-    if (iic_wait_ack()){iic_stop(); return; }
+    /* 控制字节：0x00=命令，0x40=数据 */
+    buf[0] = cmd ? OLED_CTRL_DATA : OLED_CTRL_CMD;
+    buf[1] = data;
 
+    /* 等待上一页 DMA 发送完成（此函数一般只在初始化阶段调用，不会冲突） */
+    while (oled_dma_busy) { }
 
-    /* 根据 cmd 标志位，发送控制字节 (0x00=命令, 0x40=数据) */
-    if (cmd) {
-        iic_send_byte(0x40);
-    } else {
-        iic_send_byte(0x00);
-    }
-    if (iic_wait_ack()){iic_stop(); return; }  /* 检查控制字节的应答 */
-
-    /* 发送实际数据 */
-    iic_send_byte(data);
-    if (iic_wait_ack()){iic_stop(); return; }  /* 检查数据的应答 */
-
-    iic_stop();
+    HAL_I2C_Master_Transmit(&hi2c1, OLED_I2C_ADDR, buf, 2, HAL_MAX_DELAY);
 }
 
 /**
@@ -110,7 +131,12 @@ void oled_clear(void)
 
     for (i = 0; i < 8; i++)for (n = 0; n < 128; n++)g_atk_oled_gram[n][i] = 0X00;
 
-    oled_refresh_gram();    /* 更新显示 */
+    /* 阻塞式整屏刷新，保证清屏立刻生效 */
+    for (i = 0; i < 8; i++)
+    {
+        oled_refresh_page_blocking(i);
+    }
+    oled_refresh_page = 0;
 }
 
 /**
@@ -375,6 +401,47 @@ void oled_init(void)
     oled_wr_byte(0xA6, OLED_CMD);   /* 设置显示方式;bit0:1,反相显示;0,正常显示 */
     oled_wr_byte(0xAF, OLED_CMD);   /* 开启显示 */
     oled_clear();
+}
+
+/* ---- 硬件 I2C 分页刷新的辅助函数与回调 ---- */
+
+/* 阻塞式刷新一页（供 oled_clear 等一次性场合使用） */
+static void oled_refresh_page_blocking(uint8_t page)
+{
+    uint16_t idx = 0;
+
+    oled_page_tx_buf[idx++] = OLED_CTRL_CMD;  oled_page_tx_buf[idx++] = 0xb0 + page;
+    oled_page_tx_buf[idx++] = OLED_CTRL_CMD;  oled_page_tx_buf[idx++] = 0x00;
+    oled_page_tx_buf[idx++] = OLED_CTRL_CMD;  oled_page_tx_buf[idx++] = 0x10;
+
+    for (uint8_t n = 0; n < 128; n++)
+    {
+        oled_page_tx_buf[idx++] = OLED_CTRL_DATA;
+        oled_page_tx_buf[idx++] = g_atk_oled_gram[n][page];
+    }
+
+    /* 等待上一笔 DMA 发送完成 */
+    while (oled_dma_busy) { }
+
+    HAL_I2C_Master_Transmit(&hi2c1, OLED_I2C_ADDR, oled_page_tx_buf, idx, HAL_MAX_DELAY);
+}
+
+/* I2C1 发送完成回调：清除忙标志 */
+void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef *hi2c)
+{
+    if (hi2c->Instance == I2C1)
+    {
+        oled_dma_busy = 0;
+    }
+}
+
+/* I2C1 错误回调：清除忙标志，避免忙标志永久卡住 */
+void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
+{
+    if (hi2c->Instance == I2C1)
+    {
+        oled_dma_busy = 0;
+    }
 }
 
 

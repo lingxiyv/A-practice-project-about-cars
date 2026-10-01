@@ -15,7 +15,7 @@ extern "C" {
 #define OLED_CMD        0       /* 写命令 */
 #define OLED_DATA       1       /* 写数据 */
 
-#define OLED_I2C_ADDR   (0x78)  /* OLED的设备地址 */
+#define OLED_I2C_ADDR   (0x78)  /* SSD1306 8位写地址(0x3C<<1)。STM32F1 的 HAL I2C 不自动左移，必须传 8 位地址 */
 
 void oled_wr_byte(uint8_t data, uint8_t cmd);    /* 发送一个字节到OLED */
 uint32_t oled_pow(uint8_t m, uint8_t n);         /* OLED幂函数 */
