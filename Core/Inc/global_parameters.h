@@ -32,27 +32,46 @@ extern "C" {
 #define SPEED_KP 20
 //最大速度
 #define MAX_LINEAR_SPEED_CM_S 120
-//小车运动状态标识
+//小车运动状态枚举
 typedef enum {
     CAR_STOP,
     CAR_FORWARD,
     CAR_BACKWARD,
     CAR_LEFT_TURN,
     CAR_RIGHT_TURN,
-}state_motion;      //运动状态枚举
+}state_motion;
+
+//小车控制模式枚举
+typedef enum {
+    MODE_IDLE,      //空闲（刚上电，没有收到任何指令）
+    MODE_MANUAL,    //蓝牙遥控模式
+    MODE_AUTO_ROAM, //自动漫游模式
+    MODE_AVOIDING,  //避障中（临时状态）
+} CarMode;
+
+//避障状态枚举
+typedef enum {
+    AVOID_IDLE,      // 正常巡航，无避障动作
+    AVOID_STOP,      // 刚检测到障碍，紧急刹车
+    AVOID_BACKWARD,  // 正在后退
+    AVOID_TURN       // 正在转向
+} Avoid_SubState;
 
 typedef struct {
     state_motion current_motion_state;     //当前状态
+    CarMode current_mode;                  //当前模式
+    CarMode prev_mode;                     //之前的模式
+    Avoid_SubState avoid_sub_state;        //避障状态
     uint16_t linear_speed_target_cm_s;     //目标速度
     uint8_t bt_speed_percent;              //目标速度百分比
     int16_t left_speed_cm_s;        // 左轮线速度 (m/s)
     int16_t right_speed_cm_s;       // 右轮线速度 (m/s)
     int16_t linear_speed_cm_s;      // 底盘中心线速度 (m/s)
     int16_t angular_speed;          // 底盘旋转角速度
-    uint8_t voltage_current;        //供电状态（百分比显示）
     uint16_t left_last_count;        //左轮编码器上次读取时间戳
     uint16_t right_last_count;       //右轮编码器上次读取时间戳
-    uint32_t BT_last_tick;
+    uint32_t BT_last_tick;          //蓝牙上次收到指令时间戳
+    uint32_t roam_state_tick;  // 进入当前状态的时间戳
 }car_state;
 
 extern car_state g_car_state;

@@ -112,9 +112,8 @@ int main(void)
   car_state_init();
   oled_init();
   oled_clear();
-  oled_show_string(0, 0,  "Car status:STOP", 12);
+  oled_show_string(0, 0,  "Car status:", 12);
   oled_show_string(0, 12, "Current speed(cm/s):",  12);
-  oled_show_string(0, 36, "Voltage:",  12);
   oled_refresh_gram();
 
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
@@ -128,8 +127,10 @@ int main(void)
     Bt_Parse_Commands();
     if (HAL_GetTick() - last_tick >= 10) {
       last_tick = HAL_GetTick();
+      Obstacle_Check();
       Speed_Calculation_ISR();
       PWM_automatic_adjustment();
+      Task_Auto_Roam();
     }
     // 按键处理：按下 KEY 参数复位
     if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
@@ -148,8 +149,13 @@ int main(void)
     if (HAL_GetTick() - last_oled_tick >= 20)
     {
       last_oled_tick = HAL_GetTick();
+      switch (g_car_state.current_mode) {
+        case MODE_IDLE:     oled_show_string(52, 0,  "IDLE     ", 12);break;
+        case MODE_AVOIDING: oled_show_string(52, 0,  "AVOIDING ", 12);break;
+        case MODE_MANUAL:   oled_show_string(52, 0,  "MANUAL   ", 12);break;
+        case MODE_AUTO_ROAM:oled_show_string(52, 0,  "AUTO_ROAM", 12);break;
+      }
       OLED_ShowSignedNum(0,24,g_car_state.linear_speed_cm_s,5,12);
-      OLED_ShowSignedNum(48,36,g_car_state.voltage_current,3,12);
       oled_refresh_gram();
     }
 

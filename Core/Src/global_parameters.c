@@ -10,16 +10,19 @@ car_state g_car_state;
 
 void car_state_init(void) {
     g_car_state.current_motion_state = CAR_STOP;
+    g_car_state.current_mode = MODE_IDLE;
+    g_car_state.prev_mode = MODE_IDLE;
+    g_car_state.avoid_sub_state = AVOID_IDLE;
     g_car_state.linear_speed_target_cm_s = 0;
     g_car_state.bt_speed_percent = 0;
     g_car_state.linear_speed_cm_s = 0;
     g_car_state.left_speed_cm_s = 0;
     g_car_state.right_speed_cm_s = 0;
     g_car_state.angular_speed = 0;
-    g_car_state.voltage_current = 0;
     g_car_state.left_last_count = 0;
     g_car_state.right_last_count = 0;
     g_car_state.BT_last_tick = 0;
+    g_car_state.roam_state_tick = 0;
 }
 
 // 定义缓冲区实体
@@ -59,8 +62,8 @@ void Speed_Calculation_ISR(void) {
     uint16_t right_now_count = (uint16_t)__HAL_TIM_GET_COUNTER(&htim3);
     uint16_t left_now_count  = (uint16_t)__HAL_TIM_GET_COUNTER(&htim4);
 
-    int16_t right_delta = abs(right_now_count - g_car_state.right_last_count);
-    int16_t left_delta  = abs(left_now_count - g_car_state.left_last_count);
+    int16_t right_delta = right_now_count - g_car_state.right_last_count;
+    int16_t left_delta  = left_now_count - g_car_state.left_last_count;
 
     g_car_state.right_last_count = right_now_count;
     g_car_state.left_last_count  = left_now_count;
