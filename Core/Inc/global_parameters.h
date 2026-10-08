@@ -57,6 +57,23 @@ typedef enum {
     AVOID_TURN       // 正在转向
 } Avoid_SubState;
 
+
+typedef enum {
+    SCAN_IDLE = 0,
+    SCAN_MOVE_SERVO,     // 发出舵机指令
+    SCAN_SETTLE,         // 等待舵机稳定（250ms）
+    SCAN_MEASURE,        // 触发超声波并读取
+    SCAN_COMPLETE,       // 完成一次全扫描
+} ScanState_t;
+
+typedef struct {
+    ScanState_t state;
+    uint32_t    state_tick;
+    uint8_t     angle_idx;       // 当前扫描到第几个角度
+    uint8_t     angles[7];       // 0°,30°,60°,90°,120°,150°,180°
+    uint16_t    distances[7];    // 每个角度测得距离 (mm)
+} Scan_Ctrl_t;
+
 typedef struct {
     state_motion current_motion_state;     //当前状态
     CarMode current_mode;                  //当前模式
@@ -72,6 +89,9 @@ typedef struct {
     uint16_t right_last_count;       //右轮编码器上次读取时间戳
     uint32_t BT_last_tick;          //蓝牙上次收到指令时间戳
     uint32_t roam_state_tick;  // 进入当前状态的时间戳
+
+    Scan_Ctrl_t g_scan;         //关于舵机和超声波
+
 }car_state;
 
 extern car_state g_car_state;
@@ -95,7 +115,7 @@ uint16_t Bt_RingBuf_GetCount(void);     // 获取缓冲区有效数据长度
 bool Bt_RingBuf_IsEmpty(void);
 
 void Speed_Calculation_ISR(void);       //速度变量更新
-
+void Bt_Printf(const char* fmt, ...);   //通过蓝牙的数据回传
 #ifdef __cplusplus
 }
 #endif

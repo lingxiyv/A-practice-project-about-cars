@@ -103,6 +103,8 @@ int main(void)
   MX_TIM4_Init();
   MX_I2C1_Init();
   MX_TIM3_Init();
+  MX_TIM1_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
   HAL_UART_Receive_IT(&huart2, &g_uart2_rx_byte, 1);
 
@@ -116,6 +118,7 @@ int main(void)
   oled_show_string(0, 12, "Current speed(cm/s):",  12);
   oled_refresh_gram();
 
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   /* USER CODE END 2 */
@@ -131,6 +134,7 @@ int main(void)
       Speed_Calculation_ISR();
       PWM_automatic_adjustment();
       Task_Auto_Roam();
+      Ultrasonic_Scan_Update();
     }
     // 按键处理：按下 KEY 参数复位
     if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
@@ -156,6 +160,7 @@ int main(void)
         case MODE_AUTO_ROAM:oled_show_string(52, 0,  "AUTO_ROAM", 12);break;
       }
       OLED_ShowSignedNum(0,24,g_car_state.linear_speed_cm_s,5,12);
+      OLED_ShowSignedNum(0,36,g_car_state.distance_temp,5,12);
       oled_refresh_gram();
     }
 

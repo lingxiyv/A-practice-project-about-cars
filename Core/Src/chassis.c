@@ -7,6 +7,7 @@
 #include "stdio.h"
 #include "string.h"
 #include "stdlib.h"
+#include "usart.h"
 
 #define KEY_PIN_3 GPIO_PIN_3    //连接左前方避障传感器
 #define KEY_PIN_4 GPIO_PIN_4    //连接右前方避障传感器
@@ -15,9 +16,6 @@
 // 记录随机漫游时当前动作的预期结束时间
 uint32_t roam_action_end_tick = 0;
 
-// 主循环解析逻辑
-// 蓝牙发送的指令以 '\n' (0x0A) 结尾
-
 // 切换到手动模式（避障过程中不打断，保持 AVOIDING）
 static void Enter_Manual_Mode(void) {
     if (g_car_state.current_mode != MODE_AVOIDING) {
@@ -25,6 +23,8 @@ static void Enter_Manual_Mode(void) {
     }
 }
 
+// 主循环解析逻辑
+// 蓝牙发送的指令以 '\n' (0x0A) 结尾
 void Bt_Parse_Commands(void) {
     static char cmd_line[64];
     static uint8_t idx = 0;
@@ -256,4 +256,87 @@ void Task_Auto_Roam(void)
         }
         roam_action_end_tick = now + (300 + (rand() % 500))*3;
     }
+}
+
+void Servo_control_ultrasonic(uint8_t angle)
+{
+    uint16_t pulse_width_us;
+    if (angle > 180) {
+        angle = 180;
+    }
+    if (angle < 0) {
+        angle = 0;
+    }
+    pulse_width_us = 500 + (uint16_t)((float)angle * 2000.0 / 180.0);
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pulse_width_us);
+}
+
+void Ultrasonic_Scan_Update(void) {
+    uint32_t now = HAL_GetTick();
+
+    switch (g_car_state.g_scan.state) {
+    case SCAN_MOVE_SERVO:
+        // 发出舵机指令，立即进入等待状态
+        Servo_control_ultrasonic(g_car_state.g_scan.angles[g_car_state.g_scan.angle_idx]);
+        g_car_state.g_scan.state = SCAN_SETTLE;
+        g_car_state.g_scan.state_tick = now;
+        break;
+
+    case SCAN_SETTLE:
+        // 等 250ms 让舵机转到位并稳定
+        if (now - g_car_state.g_scan.state_tick >= 200) {
+            g_car_state.g_scan.state = SCAN_MEASURE;
+            g_car_state.g_scan.state_tick = now;
+        }
+        break;
+
+    case SCAN_MEASURE:
+        // 现在舵机已经稳定，测量才有效
+        g_car_state.g_scan.distances[g_car_state.g_scan.angle_idx] = Ultrasonic_Measure_Once();
+
+        g_car_state.g_scan.angle_idx++;
+        if (g_car_state.g_scan.angle_idx >= 7) {
+            g_car_state.g_scan.state = SCAN_COMPLETE;
+        } else {
+            g_car_state.g_scan.state = SCAN_MOVE_SERVO;
+        }
+        break;
+
+    case SCAN_COMPLETE:
+        // 打印三个方向的距离
+        for (int i = 0; i < 7; i++) {
+            Bt_Printf("SCAN: %d", g_car_state.g_scan.distances[i]);
+        }
+        g_car_state.g_scan.state = SCAN_IDLE;
+        break;
+
+    case SCAN_IDLE:
+    default:
+        break;
+    }
+}
+
+void Ultrasonic_Scan_Start(void) {
+    if (g_car_state.g_scan.state != SCAN_IDLE) return;  // 正在扫描，不重复启动
+    g_car_state.g_scan.state = SCAN_MOVE_SERVO;
+    g_car_state.g_scan.angle_idx = 0;
+}
+
+
+uint16_t Ultrasonic_Measure_Once(void) {
+    uint8_t tx_cmd = 0x55;
+    uint8_t rx_buf[2];
+
+    HAL_UART_Transmit(&huart1, &tx_cmd, 1, 50);
+
+    if (HAL_UART_Receive(&huart1, rx_buf, 2, 100) != HAL_OK) {
+        return 0;
+    }
+
+    uint16_t distance_mm = ((uint16_t)rx_buf[0] << 8) | rx_buf[1];
+
+    if (distance_mm > 5000 || distance_mm < 20) {
+        return 0;
+    }
+    return distance_mm;
 }

@@ -18,6 +18,10 @@ void SET_Action_execution(state_motion car_state);  //底盘状态设置与执�
 void PWM_automatic_adjustment(void);    //PWM自动调整
 void Obstacle_Check(void);       //障碍物检测与自动避障
 void Task_Auto_Roam(void);       //随机漫游行动逻辑
+void Servo_control_ultrasonic(uint8_t angle);  //超声波舵机控制
+void Ultrasonic_Scan_Update(void);
+void Ultrasonic_Scan_Start(void);   // 启动一次扫描
+uint16_t Ultrasonic_Measure_Once(void); // 只负责测量，不再管舵机
 
 #ifdef __cplusplus
 }

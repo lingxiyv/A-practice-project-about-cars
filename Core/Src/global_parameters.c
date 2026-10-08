@@ -5,7 +5,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 
+#include "usart.h"
 car_state g_car_state;
 
 void car_state_init(void) {
@@ -23,6 +25,11 @@ void car_state_init(void) {
     g_car_state.right_last_count = 0;
     g_car_state.BT_last_tick = 0;
     g_car_state.roam_state_tick = 0;
+
+    g_car_state.g_scan.state = SCAN_IDLE;
+    for (int i = 0; i < 7; i++) {
+        g_car_state.g_scan.angles[i] = i*30;
+    }
 }
 
 // 定义缓冲区实体
@@ -72,4 +79,17 @@ void Speed_Calculation_ISR(void) {
     g_car_state.right_speed_cm_s = (int32_t)right_delta * SPEED_CALC_COEFF / SPEED_CALC_DIV;
     // 计算底盘中心线速度
     g_car_state.linear_speed_cm_s = (g_car_state.left_speed_cm_s + g_car_state.right_speed_cm_s) / 2;
+}
+
+void Bt_Printf(const char* fmt, ...) {
+    char buf[128];
+    va_list args;
+    va_start(args, fmt);
+    int len = vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+
+    if (len > 0) {
+        if (len > (int)sizeof(buf) - 1) len = sizeof(buf) - 1;  // 截断保护
+        HAL_UART_Transmit(&huart2, (uint8_t*)buf, len, 100);
+    }
 }
