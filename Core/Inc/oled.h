@@ -20,7 +20,6 @@ extern "C" {
 void oled_wr_byte(uint8_t data, uint8_t cmd);    /* 发送一个字节到OLED */
 uint32_t oled_pow(uint8_t m, uint8_t n);         /* OLED幂函数 */
 
-
 void oled_init(void);           /* OLED初始化 */
 void oled_clear(void);          /* OLED清屏 */
 void oled_display_on(void);     /* 开启OLED显示 */

@@ -32,6 +32,18 @@ extern "C" {
 #define SPEED_KP 20
 //最大速度
 #define MAX_LINEAR_SPEED_CM_S 120
+
+// 陀螺仪/坡度/转向相关参数
+#define GYRO_LSB_PER_DPS    131.0f   // MPU6050 默认 ±250°/s 灵敏度 (LSB per °/s)
+#define ACCEL_LSB_PER_G     16384.0f // MPU6050 默认 ±2g 灵敏度 (LSB per g)
+#define YAW_KP              3.0f     // 航向保持增益 (cm/s 每度误差)
+#define SLOPE_KP            15       // 坡道前馈 (PWM 每度坡度)
+#define SLOPE_DEADBAND_DEG  3        // 坡度死区(度)
+#define STEER_ARC_CM_S      30       // 弧线转向的差速量(cm/s)
+#define OBSTACLE_DIST_MM    300      // 前方判定为障碍的距离(mm)
+#define SIDE_CLEAR_MM       400      // 侧方判定为可通行距离(mm)
+#define ROAM_SPEED_PERCENT  40       // 自动漫游默认速度百分比
+
 //小车运动状态枚举
 typedef enum {
     CAR_STOP,
@@ -61,7 +73,7 @@ typedef enum {
 typedef enum {
     SCAN_IDLE = 0,
     SCAN_MOVE_SERVO,     // 发出舵机指令
-    SCAN_SETTLE,         // 等待舵机稳定（250ms）
+    SCAN_SETTLE,         // 等待舵机稳定（200ms）
     SCAN_MEASURE,        // 触发超声波并读取
     SCAN_COMPLETE,       // 完成一次全扫描
 } ScanState_t;
@@ -72,9 +84,12 @@ typedef struct {
     uint8_t     angle_idx;       // 当前扫描到第几个角度
     uint8_t     angles[7];       // 0°,30°,60°,90°,120°,150°,180°
     uint16_t    distances[7];    // 每个角度测得距离 (mm)
+    uint8_t     data_valid;      // 是否有一份完整扫描结果
 } Scan_Ctrl_t;
 
 typedef struct {
+    volatile uint8_t IS_IIC_BUSY;        //IIC全局忙标志（主循环 + 中断共享，必须 volatile）
+
     state_motion current_motion_state;     //当前状态
     CarMode current_mode;                  //当前模式
     CarMode prev_mode;                     //之前的模式
@@ -89,6 +104,12 @@ typedef struct {
     uint16_t right_last_count;       //右轮编码器上次读取时间戳
     uint32_t BT_last_tick;          //蓝牙上次收到指令时间戳
     uint32_t roam_state_tick;  // 进入当前状态的时间戳
+
+    float   yaw_deg;          // 当前航向（Z轴陀螺仪积分），正=左转
+    float   target_yaw_deg;   // 直行/转向的期望航向
+    int16_t pitch_deg;        // 俯仰角(坡度)，正=上坡
+    int16_t steer_cm_s;       // 平滑转向差速(cm/s)，正=右转
+    uint8_t gyro_valid;       // 陀螺仪是否读到有效数据
 
     Scan_Ctrl_t g_scan;         //关于舵机和超声波
 

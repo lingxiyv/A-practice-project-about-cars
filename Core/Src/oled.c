@@ -3,7 +3,7 @@
 #include "oled.h"
 #include "oledfont.h"
 #include "i2c.h"
-
+#include "global_parameters.h"
 
 /*
  * OLED的显存
@@ -51,7 +51,8 @@ void oled_refresh_gram(void)
     uint16_t idx = 0;
 
     /* 上一页的 DMA 还没发完，本次直接返回，不阻塞主循环 */
-    if (oled_dma_busy) return;
+    //或总线被占用
+    if (oled_dma_busy||g_car_state.IS_IIC_BUSY) return;
 
     /* 设置页地址（0~7） */
     oled_page_tx_buf[idx++] = OLED_CTRL_CMD;  oled_page_tx_buf[idx++] = 0xb0 + p;
@@ -66,10 +67,12 @@ void oled_refresh_gram(void)
         oled_page_tx_buf[idx++] = g_atk_oled_gram[n][p];
     }
 
+    g_car_state.IS_IIC_BUSY = 1;
     oled_dma_busy = 1;
     if (HAL_I2C_Master_Transmit_DMA(&hi2c1, OLED_I2C_ADDR, oled_page_tx_buf, idx) != HAL_OK)
     {
         oled_dma_busy = 0;      /* 启动失败，复位忙标志 */
+        g_car_state.IS_IIC_BUSY = 0;
     }
     else
     {
@@ -93,6 +96,8 @@ void oled_wr_byte(uint8_t data, uint8_t cmd)
     /* 等待上一页 DMA 发送完成（此函数一般只在初始化阶段调用，不会冲突） */
     while (oled_dma_busy) { }
 
+    //增  如果 MPU6050 等其它设备正在用 I2C 总线，等它用完
+    while (g_car_state.IS_IIC_BUSY) { }
     HAL_I2C_Master_Transmit(&hi2c1, OLED_I2C_ADDR, buf, 2, HAL_MAX_DELAY);
 }
 
@@ -421,7 +426,7 @@ static void oled_refresh_page_blocking(uint8_t page)
     }
 
     /* 等待上一笔 DMA 发送完成 */
-    while (oled_dma_busy) { }
+    while (oled_dma_busy||g_car_state.IS_IIC_BUSY) { }
 
     HAL_I2C_Master_Transmit(&hi2c1, OLED_I2C_ADDR, oled_page_tx_buf, idx, HAL_MAX_DELAY);
 }
@@ -431,7 +436,9 @@ void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef *hi2c)
 {
     if (hi2c->Instance == I2C1)
     {
+        
         oled_dma_busy = 0;
+        g_car_state.IS_IIC_BUSY = 0;
     }
 }
 
@@ -441,6 +448,7 @@ void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
     if (hi2c->Instance == I2C1)
     {
         oled_dma_busy = 0;
+        g_car_state.IS_IIC_BUSY = 0;
     }
 }
 

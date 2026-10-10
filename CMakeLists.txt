@@ -36,7 +36,9 @@ add_executable(${CMAKE_PROJECT_NAME}
         ${CMAKE_SOURCE_DIR}/Core/Src/delay.c
         ${CMAKE_SOURCE_DIR}/Core/Src/oled.c
         ${CMAKE_SOURCE_DIR}/Core/Src/chassis.c
-        ${CMAKE_SOURCE_DIR}/Core/Src/global_parameters.c)
+        ${CMAKE_SOURCE_DIR}/Core/Src/global_parameters.c
+        ${CMAKE_SOURCE_DIR}/Core/Src/gyroscope.c
+)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)

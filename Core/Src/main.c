@@ -30,6 +30,7 @@
 #include "oled.h"
 #include "global_parameters.h"
 #include "chassis.h"
+#include "gyroscope.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -54,7 +55,9 @@
 static uint32_t last_oled_tick = 0;
 static uint32_t last_tick = 0;
 static uint32_t LED_last_tick = 0;
+static uint32_t last_bt_tick = 0;
 static uint8_t g_uart2_rx_byte;
+MPU6050_Data_t mpu_data;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -111,6 +114,10 @@ int main(void)
   HAL_TIM_Encoder_Start(&htim4, TIM_CHANNEL_ALL);
   HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
 
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+
   car_state_init();
   oled_init();
   oled_clear();
@@ -118,9 +125,16 @@ int main(void)
   oled_show_string(0, 12, "Current speed(cm/s):",  12);
   oled_refresh_gram();
 
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+  if (MPU6050_Init(&hi2c1) == 1) {
+    // 初始化失败处理 (例如点亮报错 LED 或串口打印)
+    Bt_Printf("MPU6050 Init Failed!\r\n");
+    while(1) {
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+    };
+  }
+  Bt_Printf("Initialization complete\r\n");
+  Bt_Printf("Ready\r\n");
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -130,11 +144,19 @@ int main(void)
     Bt_Parse_Commands();
     if (HAL_GetTick() - last_tick >= 10) {
       last_tick = HAL_GetTick();
+      Gyro_Update();
       Obstacle_Check();
       Speed_Calculation_ISR();
       PWM_automatic_adjustment();
       Task_Auto_Roam();
       Ultrasonic_Scan_Update();
+    }
+
+    // 0.5Hz 状态回传
+    if (HAL_GetTick() - last_bt_tick >= 2000) {
+      last_bt_tick = HAL_GetTick();
+      Telemetry_Update();
+      Bt_Printf("DISAN  %d",g_car_state.g_scan.angles[0]);
     }
     // 按键处理：按下 KEY 参数复位
     if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
@@ -150,7 +172,7 @@ int main(void)
       }
     }
 
-    if (HAL_GetTick() - last_oled_tick >= 20)
+    if (HAL_GetTick() - last_oled_tick >= 50)
     {
       last_oled_tick = HAL_GetTick();
       switch (g_car_state.current_mode) {
@@ -160,7 +182,7 @@ int main(void)
         case MODE_AUTO_ROAM:oled_show_string(52, 0,  "AUTO_ROAM", 12);break;
       }
       OLED_ShowSignedNum(0,24,g_car_state.linear_speed_cm_s,5,12);
-      OLED_ShowSignedNum(0,36,g_car_state.distance_temp,5,12);
+
       oled_refresh_gram();
     }
 

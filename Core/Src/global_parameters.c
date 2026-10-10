@@ -11,6 +11,8 @@
 car_state g_car_state;
 
 void car_state_init(void) {
+    g_car_state.IS_IIC_BUSY = 0;
+
     g_car_state.current_motion_state = CAR_STOP;
     g_car_state.current_mode = MODE_IDLE;
     g_car_state.prev_mode = MODE_IDLE;
@@ -26,7 +28,14 @@ void car_state_init(void) {
     g_car_state.BT_last_tick = 0;
     g_car_state.roam_state_tick = 0;
 
+    g_car_state.yaw_deg = 0.0f;
+    g_car_state.target_yaw_deg = 0.0f;
+    g_car_state.pitch_deg = 0;
+    g_car_state.steer_cm_s = 0;
+    g_car_state.gyro_valid = 0;
+
     g_car_state.g_scan.state = SCAN_IDLE;
+    g_car_state.g_scan.data_valid = 0;
     for (int i = 0; i < 7; i++) {
         g_car_state.g_scan.angles[i] = i*30;
     }
