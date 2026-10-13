@@ -31,6 +31,7 @@ void oled_show_char(uint8_t x, uint8_t y, uint8_t chr, uint8_t size, uint8_t mod
 void oled_show_num(uint8_t x, uint8_t y, uint32_t num, uint8_t len, uint8_t size);  /* OLED显示数字 */
 void OLED_ShowSignedNum(uint8_t x, uint8_t y, int32_t num, uint8_t len, uint8_t size);/* OLED显示有符号数字 */
 void oled_show_string(uint8_t x, uint8_t y, const char *p, uint8_t size);           /* OLED显示字符串 */
+void I2C1_Bus_Recover(void);    /* I2C1 总线卡死(忙标志不释放/从机拽住SDA)时的复位手段 */
 
 #ifdef __cplusplus
 }

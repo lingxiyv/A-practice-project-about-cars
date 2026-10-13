@@ -57,6 +57,7 @@ static uint32_t last_tick = 0;
 static uint32_t LED_last_tick = 0;
 static uint32_t last_bt_tick = 0;
 static uint8_t g_uart2_rx_byte;
+static uint8_t g_mpu_init_failed = 0;   // MPU6050 上电初始化失败：降级运行，LED 快闪提示
 MPU6050_Data_t mpu_data;
 /* USER CODE END PV */
 
@@ -126,13 +127,20 @@ int main(void)
   oled_refresh_gram();
 
   if (MPU6050_Init(&hi2c1) == 1) {
-    // 初始化失败处理 (例如点亮报错 LED 或串口打印)
-    Bt_Printf("MPU6050 Init Failed!\r\n");
-    while(1) {
-      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-    };
+    /* 陀螺仪没接好/坏了时不要在这里死循环：那会把整车一起拖死
+       （舵机、超声波、蓝牙、电机全都不动，看起来像"整块板子死了"）。
+       这里只报警 + 让 LED 快闪提示，然后以 gyro_valid=0 继续跑：
+       没有陀螺仪只是失去航向保持，按角度转向会退化成超时兜底，其它功能照旧。 */
+    Bt_Printf("MPU6050 Init Failed! run without gyro\r\n");
+    g_mpu_init_failed = 1;
+  } else {
+    MPU6050_Calibrate();   // 静止标定零偏(约0.2s)：不标定 yaw 会一直漂，车就老是跑偏
   }
   Bt_Printf("Initialization complete\r\n");
+
+  /* 上电就开始循环扫描：这样任何模式下蓝牙里都能看到 L/F/R 距离，
+     舵机也会一直按 0→180° 扫描；不启动的话只有 AUTO_ROAM 才会有数据 */
+  Ultrasonic_Scan_Start();
   Bt_Printf("Ready\r\n");
 
   /* USER CODE END 2 */
@@ -142,6 +150,15 @@ int main(void)
   while (1)
   {
     Bt_Parse_Commands();
+
+    /* 蓝牙接收自愈：万一哪里出现溢出/帧错误，HAL 会直接把接收中断关掉并结束接收，
+       这里发现状态回到 READY 就重新挂上，避免蓝牙突然"什么都收不到" */
+    if (huart2.RxState == HAL_UART_STATE_READY) {
+      HAL_UART_Receive_IT(&huart2, &g_uart2_rx_byte, 1);
+    }
+    /* 超声波 USART1 的常驻接收同样需要自愈 */
+    Ultrasonic_Rx_Service();
+
     if (HAL_GetTick() - last_tick >= 10) {
       last_tick = HAL_GetTick();
       Gyro_Update();
@@ -150,13 +167,13 @@ int main(void)
       PWM_automatic_adjustment();
       Task_Auto_Roam();
       Ultrasonic_Scan_Update();
+      Servo_Test_Update();   // 舵机自检(平时是空转，不发命令)
     }
 
     // 0.5Hz 状态回传
     if (HAL_GetTick() - last_bt_tick >= 2000) {
       last_bt_tick = HAL_GetTick();
       Telemetry_Update();
-      Bt_Printf("DISAN  %d",g_car_state.g_scan.angles[0]);
     }
     // 按键处理：按下 KEY 参数复位
     if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
@@ -168,7 +185,15 @@ int main(void)
         SET_Action_execution(CAR_STOP);
         __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
         __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 0);
-        while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET); // 等待释放
+        Ultrasonic_Scan_Start();   // 复位把扫描也清了，这里重新拉起来
+        /* 等松手，但最多等 1s：按键卡住/接触不良时主循环不能永远停在这里
+           （停在这里陀螺仪、OLED、舵机就全都不更新了） */
+        {
+          uint32_t key_wait = HAL_GetTick();
+          while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET &&
+                 (HAL_GetTick() - key_wait) < 1000) {
+          }
+        }
       }
     }
 
@@ -186,7 +211,8 @@ int main(void)
       oled_refresh_gram();
     }
 
-    if (HAL_GetTick() - LED_last_tick >= 1000) {
+    /* 心跳：正常 1Hz；MPU6050 初始化失败时改成 5Hz 快闪，便于一眼看出陀螺仪有问题 */
+    if (HAL_GetTick() - LED_last_tick >= (g_mpu_init_failed ? 100u : 1000u)) {
       LED_last_tick = HAL_GetTick();
       HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
     }
@@ -243,6 +269,29 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     Bt_RingBuf_Put(g_uart2_rx_byte);
     // 再次开启接收中断
     HAL_UART_Receive_IT(&huart2, &g_uart2_rx_byte, 1);
+  }
+  else if (huart->Instance == USART1) {
+    // 超声波模块回包收满 2 字节，交给扫描状态机去解析
+    Ultrasonic_Rx_Complete();
+  }
+}
+
+/* 蓝牙中断发送完成：清掉"正在发送"标志 */
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
+  if (huart->Instance == USART2) {
+    Bt_Tx_Complete_Callback();
+  }
+}
+
+/* 串口出错回调。注意：出现溢出(ORE)时 HAL 会直接关掉接收中断并结束接收，
+   所以这里必须把错误标志清掉（重新挂接收由主循环里的自愈逻辑负责） */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
+  if (huart->Instance == USART2) {
+    __HAL_UART_CLEAR_OREFLAG(&huart2);
+  }
+  else if (huart->Instance == USART1) {
+    __HAL_UART_CLEAR_OREFLAG(&huart1);
+    Ultrasonic_Rx_Error();
   }
 }
 /* USER CODE END 4 */

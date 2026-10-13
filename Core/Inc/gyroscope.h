@@ -26,6 +26,7 @@ typedef struct {
 // 函数声明
 uint8_t MPU6050_Init(I2C_HandleTypeDef *hi2c);
 uint8_t MPU6050_ReadAll(I2C_HandleTypeDef *hi2c, MPU6050_Data_t *data);
+void    MPU6050_Calibrate(void);   // 上电静止标定零偏（车必须静止）
 
 // 姿态解算与航向
 void  Gyro_Update(void);

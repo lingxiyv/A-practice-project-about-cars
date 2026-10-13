@@ -37,8 +37,47 @@ static uint8_t g_atk_oled_gram[128][8];
 static uint8_t oled_page_tx_buf[OLED_PAGE_BUF_SIZE];
 static volatile uint8_t oled_dma_busy = 0;   /* 1：DMA 正在发送一页 */
 static uint8_t oled_refresh_page = 0;        /* 下一次要刷新的页号 0~7 */
+static uint32_t oled_dma_start_tick = 0;     /* 本次 DMA 的起始时刻，用来判断它是不是卡死了 */
 
 static void oled_refresh_page_blocking(uint8_t page);
+
+/**
+ * @brief  I2C1 总线复位
+ * @note   只在总线真的被卡住时调用（DMA 完成回调一直不来、或从机把 SDA 拽住不放）。
+ *         不复位的话 g_car_state.IS_IIC_BUSY 可能永远是 1，陀螺仪就再也抢不到 I2C 了。
+ */
+void I2C1_Bus_Recover(void)
+{
+    HAL_I2C_DeInit(&hi2c1);
+    MX_I2C1_Init();            /* 重新配 GPIO/时钟/DMA/中断 */
+    oled_dma_busy = 0;
+    g_car_state.IS_IIC_BUSY = 0;
+}
+
+/**
+ * @brief  等 I2C 总线空出来
+ * @param  timeout_ms 最多等多久
+ * @retval 1=已空闲  0=超时
+ * @note   原来的写法是 while(忙) 死等：一旦忙标志因为异常没被清掉，整个程序就挂死在这里
+ */
+static uint8_t oled_wait_idle(uint32_t timeout_ms)
+{
+    uint32_t start = HAL_GetTick();
+
+    while (oled_dma_busy || g_car_state.IS_IIC_BUSY)
+    {
+        if (oled_dma_busy && (HAL_GetTick() - oled_dma_start_tick) > I2C_DMA_STUCK_MS)
+        {
+            I2C1_Bus_Recover();     /* DMA 明显卡死，复位总线再看 */
+            continue;
+        }
+        if ((HAL_GetTick() - start) > timeout_ms)
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
 
 /**
  * @brief       更新显存到OLED
@@ -50,9 +89,17 @@ void oled_refresh_gram(void)
     uint8_t p = oled_refresh_page;
     uint16_t idx = 0;
 
-    /* 上一页的 DMA 还没发完，本次直接返回，不阻塞主循环 */
-    //或总线被占用
-    if (oled_dma_busy||g_car_state.IS_IIC_BUSY) return;
+    /* 上一页的 DMA 还没发完，或者总线正被陀螺仪占用：本次直接返回，不阻塞主循环 */
+    if (oled_dma_busy || g_car_state.IS_IIC_BUSY)
+    {
+        /* 兜底：DMA 完成回调一直不来（总线被从机拉死）就把总线复位，
+           否则这个忙标志会永久占着总线，陀螺仪永远读不到数据 */
+        if (oled_dma_busy && (HAL_GetTick() - oled_dma_start_tick) > I2C_DMA_STUCK_MS)
+        {
+            I2C1_Bus_Recover();
+        }
+        return;
+    }
 
     /* 设置页地址（0~7） */
     oled_page_tx_buf[idx++] = OLED_CTRL_CMD;  oled_page_tx_buf[idx++] = 0xb0 + p;
@@ -69,6 +116,7 @@ void oled_refresh_gram(void)
 
     g_car_state.IS_IIC_BUSY = 1;
     oled_dma_busy = 1;
+    oled_dma_start_tick = HAL_GetTick();
     if (HAL_I2C_Master_Transmit_DMA(&hi2c1, OLED_I2C_ADDR, oled_page_tx_buf, idx) != HAL_OK)
     {
         oled_dma_busy = 0;      /* 启动失败，复位忙标志 */
@@ -84,6 +132,8 @@ void oled_refresh_gram(void)
  * @brief  向 OLED 写入一个字节数据
  * @param  data: 要写入的数据
  * @param  cmd:  命令/数据标志位 (0: 命令, 1: 数据)
+ * @note   只在初始化/清屏阶段用到。这里等总线也是**有上限**的：超时就放弃这个字节，
+ *         绝不会像以前那样 while(忙) 死等，把整个程序卡在这里。
  */
 void oled_wr_byte(uint8_t data, uint8_t cmd)
 {
@@ -93,12 +143,9 @@ void oled_wr_byte(uint8_t data, uint8_t cmd)
     buf[0] = cmd ? OLED_CTRL_DATA : OLED_CTRL_CMD;
     buf[1] = data;
 
-    /* 等待上一页 DMA 发送完成（此函数一般只在初始化阶段调用，不会冲突） */
-    while (oled_dma_busy) { }
+    if (!oled_wait_idle(200)) return;   /* 总线一直不空：丢掉这个字节 */
 
-    //增  如果 MPU6050 等其它设备正在用 I2C 总线，等它用完
-    while (g_car_state.IS_IIC_BUSY) { }
-    HAL_I2C_Master_Transmit(&hi2c1, OLED_I2C_ADDR, buf, 2, HAL_MAX_DELAY);
+    HAL_I2C_Master_Transmit(&hi2c1, OLED_I2C_ADDR, buf, 2, 200);
 }
 
 /**
@@ -425,10 +472,10 @@ static void oled_refresh_page_blocking(uint8_t page)
         oled_page_tx_buf[idx++] = g_atk_oled_gram[n][page];
     }
 
-    /* 等待上一笔 DMA 发送完成 */
-    while (oled_dma_busy||g_car_state.IS_IIC_BUSY) { }
+    /* 等待上一笔 DMA 发送完成 / 陀螺仪用完总线：有上限，不会死等 */
+    (void)oled_wait_idle(200);
 
-    HAL_I2C_Master_Transmit(&hi2c1, OLED_I2C_ADDR, oled_page_tx_buf, idx, HAL_MAX_DELAY);
+    HAL_I2C_Master_Transmit(&hi2c1, OLED_I2C_ADDR, oled_page_tx_buf, idx, 200);
 }
 
 /* I2C1 发送完成回调：清除忙标志 */

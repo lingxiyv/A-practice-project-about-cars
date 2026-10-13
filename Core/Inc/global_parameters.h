@@ -44,6 +44,50 @@ extern "C" {
 #define SIDE_CLEAR_MM       400      // 侧方判定为可通行距离(mm)
 #define ROAM_SPEED_PERCENT  40       // 自动漫游默认速度百分比
 
+// 陀螺仪零偏标定：上电时静止采样多少次。不标定的话积分出的 yaw 会一直漂，
+// 航向保持(YAW_KP)就一直往一边修，车看起来就是“跑偏 / 两轮不同步”
+#define GYRO_CALIB_SAMPLES  100
+
+// 舵机(PA8 / TIM1_CH1，50Hz)
+#define SERVO_MIN_PULSE_US   500     // 0°   对应脉宽(us)
+#define SERVO_MAX_PULSE_US   2400    // 180° 对应脉宽(us)。不要给到 2500us：
+                                     // 有些舵机机械行程到不了，会一直堵转“嗡嗡”响却不转
+#define SERVO_CENTER_ANGLE   90      // 扫描间隙时舵机停放角度
+
+// 超声波(US-100 / AJ-SR04M 等串口型，接 USART1 PA9/PA10，9600)
+#define ULTRASONIC_TRIGGER_BYTE 0x55    // 触发字节，模块回 2 字节：距离高 8 位、低 8 位(mm)
+#define ULTRASONIC_MIN_MM    20         // 有效距离下限(mm)
+#define ULTRASONIC_MAX_MM    5000       // 有效距离上限(mm)
+#define SCAN_SETTLE_MS       100        // 发完舵机角度后等它转到位
+#define SCAN_REPLY_TIMEOUT_MS 120       // 等超声波回包超时。US-100 一次测距约 50~60ms
+#define SCAN_GAP_MS          800        // 两轮扫描之间的间隔
+#define SCAN_MANUAL_HOLD_MS  5000       // 手动指定角度后暂停自动扫描的时间
+#define SCAN_CONTINUOUS      1          // 1=上电后自动循环扫描，任何模式下都有新鲜距离数据
+
+// 主循环不允许被长时间卡住的相关保护阈值
+#define I2C_DMA_STUCK_MS     50         // OLED 的 DMA 超过这么久没完成就复位 I2C，避免忙标志被永久占用
+#define I2C_LOCK_WAIT_MS     20         // 等 I2C 空闲的上限，超时就本次放弃，下一拍再来
+#define BT_TX_TIMEOUT_MS     200        // 蓝牙中断发送卡住的兜底时间
+
+// 扫描角度在数组里的下标：0°~60° 在车左侧，90° 是正前方，120°~180° 在车右侧
+#define SCAN_IDX_LEFT_FROM   0
+#define SCAN_IDX_LEFT_TO     2
+#define SCAN_IDX_FRONT       3
+#define SCAN_IDX_RIGHT_FROM  4
+#define SCAN_IDX_RIGHT_TO    6
+
+// ---- 避障(红外 + 超声波)与按角度转向 ----
+#define AVOID_STOP_MS        200    // 撞见障碍后先急停多久
+#define AVOID_BACK_MS        500    // 后退多久再开始转向
+#define AVOID_TURN_TIMEOUT_MS 4000  // 按角度转向的兜底超时（陀螺仪失效或车转不动时用）
+#define AVOID_TURN_DEFAULT_DEG 90   // 默认转向角度
+#define AVOID_TURN_SMALL_DEG   60   // 正前方还有余量时，小角度让开
+#define AVOID_TURN_LARGE_DEG  120   // 障碍贴得很近时，大角度让开
+#define AVOID_TURN_MAX_DEG    150   // 转角上限
+#define AVOID_TURN_EXTRA_DEG   30   // 要转过去那一侧也不开阔时，额外加的角度
+#define AVOID_NEAR_MM         150   // 判定“障碍很近”的距离(mm)
+#define AVOID_MIN_SPEED_CM_S   30   // 避障动作的最低速度(cm/s)：speed 为 0 时也得能转得动
+
 //小车运动状态枚举
 typedef enum {
     CAR_STOP,
@@ -73,8 +117,9 @@ typedef enum {
 typedef enum {
     SCAN_IDLE = 0,
     SCAN_MOVE_SERVO,     // 发出舵机指令
-    SCAN_SETTLE,         // 等待舵机稳定（200ms）
-    SCAN_MEASURE,        // 触发超声波并读取
+    SCAN_SETTLE,         // 等待舵机稳定
+    SCAN_MEASURE,        // 已触发超声波，等回包（中断接收，不阻塞主循环）
+    SCAN_GAP,            // 两轮扫描之间的间隔（舵机停在中位）
     SCAN_COMPLETE,       // 完成一次全扫描
 } ScanState_t;
 
@@ -85,6 +130,19 @@ typedef struct {
     uint8_t     angles[7];       // 0°,30°,60°,90°,120°,150°,180°
     uint16_t    distances[7];    // 每个角度测得距离 (mm)
     uint8_t     data_valid;      // 是否有一份完整扫描结果
+
+    /* 超声波：常驻中断接收 + 非阻塞测距
+       注意不要用"中断收满 2 字节"的写法：只要有一个字节因为溢出(ORE)没被及时读走，
+       HAL 就会把这次接收整个中止掉，永远等不到第 2 个字节 → 距离全是 0。 */
+    uint8_t  rx_buf[2];          // 最近一帧的原始字节（诊断用）
+    volatile uint16_t rx_total;  // 累计收到的字节数（中断里自增）
+    uint16_t rx_mark;            // 触发测距那一刻的 rx_total
+    uint8_t  rx_active;          // 已触发，正在等回包
+    uint8_t  rx_error;           // 接收出错（溢出/帧错误）
+    uint32_t hold_until;         // 在此之前不启动新一轮扫描（手动指定角度用）
+    uint8_t  continuous;         // 1=自动循环扫描
+    uint8_t  ok_cnt;             // 本轮成功次数
+    uint8_t  err_cnt;            // 本轮失败/超时次数
 } Scan_Ctrl_t;
 
 typedef struct {
@@ -111,6 +169,10 @@ typedef struct {
     int16_t steer_cm_s;       // 平滑转向差速(cm/s)，正=右转
     uint8_t gyro_valid;       // 陀螺仪是否读到有效数据
 
+    /* 按角度转向：用陀螺仪积分的航向判断转够了没有，不再靠"转多少毫秒"猜 */
+    float   turn_start_yaw;   // 本次转向开始时的航向
+    int16_t turn_target_deg;  // 本次转向目标角度，带符号：正=左转，负=右转
+
     Scan_Ctrl_t g_scan;         //关于舵机和超声波
 
 }car_state;
@@ -136,7 +198,8 @@ uint16_t Bt_RingBuf_GetCount(void);     // 获取缓冲区有效数据长度
 bool Bt_RingBuf_IsEmpty(void);
 
 void Speed_Calculation_ISR(void);       //速度变量更新
-void Bt_Printf(const char* fmt, ...);   //通过蓝牙的数据回传
+void Bt_Printf(const char* fmt, ...);   //通过蓝牙的数据回传（中断发送，不阻塞主循环）
+void Bt_Tx_Complete_Callback(void);     //蓝牙发送完成，由 HAL_UART_TxCpltCallback 调用
 #ifdef __cplusplus
 }
 #endif

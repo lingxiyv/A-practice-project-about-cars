@@ -34,11 +34,27 @@ void car_state_init(void) {
     g_car_state.steer_cm_s = 0;
     g_car_state.gyro_valid = 0;
 
+    g_car_state.turn_start_yaw  = 0.0f;
+    g_car_state.turn_target_deg = 0;
+
     g_car_state.g_scan.state = SCAN_IDLE;
     g_car_state.g_scan.data_valid = 0;
     for (int i = 0; i < 7; i++) {
         g_car_state.g_scan.angles[i] = i*30;
+        g_car_state.g_scan.distances[i] = 0;
     }
+    g_car_state.g_scan.state_tick = 0;
+    g_car_state.g_scan.angle_idx  = 0;
+    g_car_state.g_scan.rx_active  = 0;
+    g_car_state.g_scan.rx_error   = 0;
+    g_car_state.g_scan.rx_total   = 0;
+    g_car_state.g_scan.rx_mark    = 0;
+    g_car_state.g_scan.rx_buf[0]  = 0;
+    g_car_state.g_scan.rx_buf[1]  = 0;
+    g_car_state.g_scan.hold_until = 0;
+    g_car_state.g_scan.continuous = SCAN_CONTINUOUS;
+    g_car_state.g_scan.ok_cnt     = 0;
+    g_car_state.g_scan.err_cnt    = 0;
 }
 
 // 定义缓冲区实体
@@ -90,15 +106,45 @@ void Speed_Calculation_ISR(void) {
     g_car_state.linear_speed_cm_s = (g_car_state.left_speed_cm_s + g_car_state.right_speed_cm_s) / 2;
 }
 
+/* 蓝牙发送缓冲与状态。
+   原来是 HAL_UART_Transmit 阻塞发送：一条 60~100 字节的状态回传 @9600 要堵住主循环
+   60~100ms，陀螺仪/OLED/电机控制全被卡住。改成中断发送，主循环最多只等 30ms。 */
+static char g_bt_tx_buf[BT_RX_BUF_SIZE];
+static volatile uint8_t g_bt_tx_busy = 0;
+static uint32_t g_bt_tx_tick = 0;
+
+void Bt_Tx_Complete_Callback(void) {
+    g_bt_tx_busy = 0;
+}
+
 void Bt_Printf(const char* fmt, ...) {
-    char buf[128];
     va_list args;
+    int len;
+
+    /* 发送卡死兜底：正常几毫秒就发完了，超过 BT_TX_TIMEOUT_MS 说明出问题了 */
+    if (g_bt_tx_busy && (HAL_GetTick() - g_bt_tx_tick) > BT_TX_TIMEOUT_MS) {
+        HAL_UART_AbortTransmit(&huart2);
+        g_bt_tx_busy = 0;
+    }
+
+    /* 上一条还没发完：最多等 30ms，超了就放弃这一条，绝不长时间阻塞主循环 */
+    if (g_bt_tx_busy) {
+        uint32_t start = HAL_GetTick();
+        while (g_bt_tx_busy && (HAL_GetTick() - start) < 30) {
+        }
+        if (g_bt_tx_busy) return;   // 丢掉这一条总比堵住主循环好
+    }
+
     va_start(args, fmt);
-    int len = vsnprintf(buf, sizeof(buf), fmt, args);
+    len = vsnprintf(g_bt_tx_buf, sizeof(g_bt_tx_buf), fmt, args);
     va_end(args);
 
-    if (len > 0) {
-        if (len > (int)sizeof(buf) - 1) len = sizeof(buf) - 1;  // 截断保护
-        HAL_UART_Transmit(&huart2, (uint8_t*)buf, len, 100);
+    if (len <= 0) return;
+    if (len > (int)sizeof(g_bt_tx_buf) - 1) len = sizeof(g_bt_tx_buf) - 1;  // 截断保护
+
+    g_bt_tx_busy = 1;
+    g_bt_tx_tick = HAL_GetTick();
+    if (HAL_UART_Transmit_IT(&huart2, (uint8_t*)g_bt_tx_buf, (uint16_t)len) != HAL_OK) {
+        g_bt_tx_busy = 0;   // 启动失败就直接放弃
     }
 }

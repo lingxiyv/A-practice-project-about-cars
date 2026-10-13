@@ -60,7 +60,7 @@ extern DMA_HandleTypeDef hdma_i2c1_tx;
 extern I2C_HandleTypeDef hi2c1;
 extern UART_HandleTypeDef huart2;
 /* USER CODE BEGIN EV */
-
+extern UART_HandleTypeDef huart1;   /* 超声波 US-100 挂在 USART1 上 */
 /* USER CODE END EV */
 
 /******************************************************************************/
@@ -272,5 +272,11 @@ void USART2_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
-
+/**
+  * @brief 超声波模块(USART1)的回包中断：配合 HAL_UART_Receive_IT 使用
+  */
+void USART1_IRQHandler(void)
+{
+  HAL_UART_IRQHandler(&huart1);
+}
 /* USER CODE END 1 */
